@@ -11,9 +11,9 @@ Generate beautiful, minimalist map posters for any city in the world.
 |:------------:|:--------------------------:|:---------------:|:------:|
 | USA          | San Francisco              | sunset          | <img src="posters/san_francisco_sunset_20260118_144726.png" width="250"> |
 | Spain        | Barcelona                  | warm_beige      | <img src="posters/barcelona_warm_beige_20260118_140048.png" width="250"> |
-| Spain        | Barcelona (rotated, north) | warm_beige      | <img src="posters/barcelona_warm_beige_rotated_badge_20260209_170648.png" width="250"> |
-| Spain        | Granada (rotated)          | terracotta      | <img src="posters/granada_terracotta_rotated_20260208_183714.png" width="250"> |
-| Spain        | Granada (rotated, north)   | terracotta      | <img src="posters/granada_terracotta_rotated_badge_20260209_163443.png" width="250"> |
+| Spain        | Barcelona<br/>(rotated 50 degrees, north) | warm_beige      | <img src="posters/barcelona_warm_beige_rotated_badge_20260209_170648.png" width="250"> |
+| Spain        | Granada<br/>(rotated -64 degrees)          | terracotta      | <img src="posters/granada_terracotta_rotated_20260208_183714.png" width="250"> |
+| Spain        | Granada<br/>(rotated -64 degrees, north)   | terracotta      | <img src="posters/granada_terracotta_rotated_badge_20260209_163443.png" width="250"> |
 | Italy        | Venice                     | blueprint       | <img src="posters/venice_blueprint_20260118_140505.png" width="250"> |
 | Japan        | Tokyo                      | japanese_ink    | <img src="posters/tokyo_japanese_ink_20260118_142446.png" width="250"> |
 | India        | Mumbai                     | contrast_zones  | <img src="posters/mumbai_contrast_zones_20260118_145843.png" width="250"> |
