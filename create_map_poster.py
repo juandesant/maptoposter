@@ -14,6 +14,7 @@ import os
 import pickle
 import sys
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -25,7 +26,7 @@ import osmnx as ox
 from geopandas import GeoDataFrame
 from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, Polygon
 from matplotlib.font_manager import FontProperties
 from networkx import MultiDiGraph
 from shapely import affinity
@@ -48,6 +49,8 @@ FONTS_DIR = "fonts"
 POSTERS_DIR = "posters"
 
 FILE_ENCODING = "utf-8"
+COMPASS_SVG_PATH = Path("compass.svg")
+_COMPASS_SHAPES_CACHE = None
 
 FONTS = load_fonts()
 
@@ -270,6 +273,56 @@ def parse_bool_arg(value: str) -> bool:
     )
 
 
+def _parse_svg_points(points_str):
+    """
+    Parse SVG polygon point lists into numeric (x, y) tuples.
+    """
+    coords = []
+    for token in points_str.replace("\n", " ").replace("\t", " ").split():
+        if "," not in token:
+            continue
+        x_str, y_str = token.split(",", 1)
+        coords.append((float(x_str), float(y_str)))
+    return coords
+
+
+def _load_compass_shapes():
+    """
+    Load polygon geometry and style from compass.svg.
+    Returns a list of dicts: {"points": [...], "fill": str, "stroke": str}
+    """
+    global _COMPASS_SHAPES_CACHE
+    if _COMPASS_SHAPES_CACHE is not None:
+        return _COMPASS_SHAPES_CACHE
+
+    if not COMPASS_SVG_PATH.exists():
+        _COMPASS_SHAPES_CACHE = []
+        return _COMPASS_SHAPES_CACHE
+
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    root = ET.parse(COMPASS_SVG_PATH).getroot()
+    symbol = root.find(".//svg:symbol[@id='elm']", ns)
+    if symbol is None:
+        _COMPASS_SHAPES_CACHE = []
+        return _COMPASS_SHAPES_CACHE
+
+    shapes = []
+    for poly in symbol.findall("svg:polygon", ns):
+        points = _parse_svg_points(poly.attrib.get("points", ""))
+        if not points:
+            continue
+        shapes.append(
+            {
+                "points": points,
+                "fill": poly.attrib.get("fill", "#FBFBFB"),
+                "stroke": poly.attrib.get("stroke", "#333"),
+            }
+        )
+
+    _COMPASS_SHAPES_CACHE = shapes
+    return _COMPASS_SHAPES_CACHE
+
+
 def draw_north_badge(ax, orientation_offset):
     """
     Draw a north orientation badge in axes coordinates.
@@ -277,12 +330,6 @@ def draw_north_badge(ax, orientation_offset):
     # Badge anchor in poster-local coordinates
     cx, cy = 0.08, 0.90
     radius = 0.04
-    arrow_len = 0.026
-    theta = np.deg2rad(orientation_offset)
-
-    # Geographic north direction relative to local map coordinates
-    dx = np.sin(theta) * arrow_len
-    dy = np.cos(theta) * arrow_len
 
     badge = Circle(
         (cx, cy),
@@ -296,21 +343,55 @@ def draw_north_badge(ax, orientation_offset):
     )
     ax.add_patch(badge)
 
-    ax.annotate(
-        "",
-        xy=(cx + dx, cy + dy),
-        xytext=(cx, cy),
-        xycoords=ax.transAxes,
-        textcoords=ax.transAxes,
-        arrowprops={
-            "arrowstyle": "-|>",
-            "color": THEME["text"],
-            "linewidth": 1.2,
-            "shrinkA": 0,
-            "shrinkB": 0,
-        },
-        zorder=13,
-    )
+    compass_shapes = _load_compass_shapes()
+    compass_scale = radius * 0.095
+    theta = np.deg2rad(orientation_offset)
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+
+    # Positive user offset is clockwise; SVG point rotation math below is clockwise.
+    for shape in compass_shapes:
+        transformed_points = []
+        for x, y in shape["points"]:
+            rx = x * cos_t + y * sin_t
+            ry = -x * sin_t + y * cos_t
+            transformed_points.append(
+                (cx + (rx * compass_scale), cy + (ry * compass_scale))
+            )
+
+        ax.add_patch(
+            Polygon(
+                transformed_points,
+                closed=True,
+                transform=ax.transAxes,
+                facecolor=shape["fill"],
+                edgecolor=shape["stroke"],
+                linewidth=0.8,
+                zorder=13,
+            )
+        )
+
+    # Fallback if compass.svg is unavailable or malformed.
+    if not compass_shapes:
+        arrow_len = 0.026
+        dx = np.sin(theta) * arrow_len
+        dy = np.cos(theta) * arrow_len
+        ax.annotate(
+            "",
+            xy=(cx + dx, cy + dy),
+            xytext=(cx, cy),
+            xycoords=ax.transAxes,
+            textcoords=ax.transAxes,
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": THEME["text"],
+                "linewidth": 1.2,
+                "shrinkA": 0,
+                "shrinkB": 0,
+            },
+            zorder=13,
+        )
+
     ax.text(
         cx,
         cy - (radius * 0.95),
