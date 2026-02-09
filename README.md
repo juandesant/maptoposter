@@ -79,6 +79,9 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
+| **OPTIONAL:** `--orientation-offset` | `-O` | Map orientation offset in degrees (clockwise positive) | 0.0 (range: -180 to 180) |
+| **OPTIONAL:** `--show-north` | | Show north badge (`true/false`, or flag only) | Auto: false when `-O=0`, true when `-O!=0` |
+| **OPTIONAL:** `--hide-north` | | Hide north badge (overrides `--show-north`) | false |
 
 ### Multilingual Support - i18n
 
@@ -185,6 +188,18 @@ python create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000 
 
 # Override center coordinates
 python create_map_poster.py --city "New York" --country "USA" -lat 40.776676 -long -73.971321 -t noir
+
+# Rotate map orientation by +30° clockwise from north
+python create_map_poster.py --city "Paris" --country "France" -O 30
+
+# Force-hide north badge even with non-zero orientation
+python create_map_poster.py --city "Paris" --country "France" -O 30 --hide-north
+
+# Force-show north badge even at default orientation
+python create_map_poster.py --city "Paris" --country "France" --show-north
+
+# Explicit boolean value
+python create_map_poster.py --city "Paris" --country "France" -O 30 --show-north false
 
 # List available themes
 python create_map_poster.py --list-themes

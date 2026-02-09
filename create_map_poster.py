@@ -25,8 +25,10 @@ import osmnx as ox
 from geopandas import GeoDataFrame
 from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
+from matplotlib.patches import Circle
 from matplotlib.font_manager import FontProperties
 from networkx import MultiDiGraph
+from shapely import affinity
 from shapely.geometry import Point
 from tqdm import tqdm
 
@@ -252,6 +254,77 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     )
 
 
+def parse_bool_arg(value: str) -> bool:
+    """
+    Parse CLI boolean values from common true/false strings.
+    """
+    normalized = value.strip().lower()
+    truthy = {"true", "1", "yes", "y", "on"}
+    falsy = {"false", "0", "no", "n", "off"}
+    if normalized in truthy:
+        return True
+    if normalized in falsy:
+        return False
+    raise argparse.ArgumentTypeError(
+        f"Invalid boolean value '{value}'. Use true/false."
+    )
+
+
+def draw_north_badge(ax, orientation_offset):
+    """
+    Draw a north orientation badge in axes coordinates.
+    """
+    # Badge anchor in poster-local coordinates
+    cx, cy = 0.08, 0.90
+    radius = 0.04
+    arrow_len = 0.026
+    theta = np.deg2rad(orientation_offset)
+
+    # Geographic north direction relative to local map coordinates
+    dx = np.sin(theta) * arrow_len
+    dy = np.cos(theta) * arrow_len
+
+    badge = Circle(
+        (cx, cy),
+        radius=radius,
+        transform=ax.transAxes,
+        facecolor=THEME["bg"],
+        edgecolor=THEME["text"],
+        linewidth=1.2,
+        alpha=0.9,
+        zorder=12,
+    )
+    ax.add_patch(badge)
+
+    ax.annotate(
+        "",
+        xy=(cx + dx, cy + dy),
+        xytext=(cx, cy),
+        xycoords=ax.transAxes,
+        textcoords=ax.transAxes,
+        arrowprops={
+            "arrowstyle": "-|>",
+            "color": THEME["text"],
+            "linewidth": 1.2,
+            "shrinkA": 0,
+            "shrinkB": 0,
+        },
+        zorder=13,
+    )
+    ax.text(
+        cx,
+        cy - (radius * 0.95),
+        "N",
+        transform=ax.transAxes,
+        color=THEME["text"],
+        ha="center",
+        va="top",
+        fontsize=9,
+        fontweight="bold",
+        zorder=13,
+    )
+
+
 def get_edge_colors_by_type(g):
     """
     Assigns colors to edges based on road type hierarchy.
@@ -406,6 +479,77 @@ def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     )
 
 
+def get_projected_center(g_proj, center_lat_lon):
+    """
+    Project center point into graph CRS and return metric x/y coordinates.
+    """
+    lat, lon = center_lat_lon
+    center = (
+        ox.projection.project_geometry(
+            Point(lon, lat),
+            crs="EPSG:4326",
+            to_crs=g_proj.graph["crs"],
+        )[0]
+    )
+    return center.x, center.y
+
+
+def rotate_graph_and_features(g_proj, features, center_lat_lon, orientation_offset):
+    """
+    Rotate graph and feature layers around the map center.
+
+    Positive user values are interpreted clockwise relative to north.
+    Shapely's positive angle is counter-clockwise, so we negate the value.
+    """
+    if orientation_offset == 0:
+        return g_proj, features
+
+    center_x, center_y = get_projected_center(g_proj, center_lat_lon)
+    angle_ccw = -orientation_offset
+
+    g_rotated = g_proj.copy()
+    cos_theta = np.cos(np.deg2rad(angle_ccw))
+    sin_theta = np.sin(np.deg2rad(angle_ccw))
+
+    for _node, data in g_rotated.nodes(data=True):
+        x = data.get("x")
+        y = data.get("y")
+        if x is None or y is None:
+            continue
+        dx = x - center_x
+        dy = y - center_y
+        data["x"] = center_x + (dx * cos_theta - dy * sin_theta)
+        data["y"] = center_y + (dx * sin_theta + dy * cos_theta)
+
+    for _u, _v, _k, data in g_rotated.edges(keys=True, data=True):
+        geom = data.get("geometry")
+        if geom is not None:
+            data["geometry"] = affinity.rotate(
+                geom,
+                angle_ccw,
+                origin=(center_x, center_y),
+                use_radians=False,
+            )
+
+    rotated_features = []
+    for gdf in features:
+        if gdf is None or gdf.empty:
+            rotated_features.append(gdf)
+            continue
+        gdf_rotated = gdf.copy()
+        gdf_rotated["geometry"] = gdf_rotated.geometry.apply(
+            lambda geom: affinity.rotate(
+                geom,
+                angle_ccw,
+                origin=(center_x, center_y),
+                use_radians=False,
+            )
+        )
+        rotated_features.append(gdf_rotated)
+
+    return g_rotated, rotated_features
+
+
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
@@ -493,6 +637,8 @@ def create_poster(
     display_city=None,
     display_country=None,
     fonts=None,
+    orientation_offset=0.0,
+    show_north=False,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -568,6 +714,11 @@ def create_poster(
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
 
+    # Apply optional orientation offset before plotting map layers
+    g_proj, (water, parks) = rotate_graph_and_features(
+        g_proj, [water, parks], point, orientation_offset
+    )
+
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
     if water is not None and not water.empty:
@@ -614,6 +765,8 @@ def create_poster(
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+    if show_north:
+        draw_north_badge(ax, orientation_offset)
 
     # Calculate scale factor based on smaller dimension (reference 12 inches)
     # This ensures text scales properly for both portrait and landscape orientations
@@ -955,6 +1108,27 @@ Examples:
         choices=["png", "svg", "pdf"],
         help="Output format for the poster (default: png)",
     )
+    parser.add_argument(
+        "--orientation-offset",
+        "-O",
+        type=float,
+        default=0.0,
+        help="Map orientation offset in degrees relative to north (clockwise positive, range: -180 to 180)",
+    )
+    parser.add_argument(
+        "--show-north",
+        nargs="?",
+        const=True,
+        default=None,
+        type=parse_bool_arg,
+        metavar="true/false",
+        help="Show north badge. If omitted, defaults to true when --orientation-offset != 0, else false.",
+    )
+    parser.add_argument(
+        "--hide-north",
+        action="store_true",
+        help="Hide north badge (overrides --show-north).",
+    )
 
     args = parser.parse_args()
 
@@ -985,6 +1159,17 @@ Examples:
             f"⚠ Height {args.height} exceeds the maximum allowed limit of 20. It's enforced as max limit 20."
         )
         args.height = 20.0
+    if not -180 <= args.orientation_offset <= 180:
+        print(
+            f"Error: --orientation-offset must be between -180 and 180. Received {args.orientation_offset}."
+        )
+        sys.exit(1)
+    if args.hide_north:
+        show_north = False
+    elif args.show_north is None:
+        show_north = args.orientation_offset != 0
+    else:
+        show_north = args.show_north
 
     available_themes = get_available_themes()
     if not available_themes:
@@ -1037,6 +1222,8 @@ Examples:
                 display_city=args.display_city,
                 display_country=args.display_country,
                 fonts=custom_fonts,
+                orientation_offset=args.orientation_offset,
+                show_north=show_north,
             )
 
         print("\n" + "=" * 50)
